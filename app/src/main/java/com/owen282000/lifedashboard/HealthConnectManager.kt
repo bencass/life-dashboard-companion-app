@@ -10,6 +10,8 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import kotlin.reflect.KClass
 
@@ -302,24 +304,45 @@ class HealthConnectManager(private val context: Context) {
         endTime: Instant,
         lastSync: Instant?
     ): List<StepsData> {
-        val request = ReadRecordsRequest(
-            recordType = StepsRecord::class,
-            timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
-        )
+        val results = mutableListOf<StepsData>()
+        val sydneyZone = ZoneId.of("Australia/Sydney")
+        var dayStart = LocalDate.ofInstant(startTime, sydneyZone)
+            .atStartOfDay(sydneyZone)
+            .toInstant()
+        val rangeEnd = endTime
 
-        val response = healthConnectClient.readRecords(request)
+        while (dayStart.isBefore(rangeEnd)) {
+            val dayEnd = LocalDate.ofInstant(dayStart, sydneyZone)
+                .plusDays(1)
+                .atStartOfDay(sydneyZone)
+                .toInstant()
+            val effectiveEnd = if (dayEnd.isAfter(rangeEnd)) rangeEnd else dayEnd
 
-        return response.records
-            .filter { record ->
-                lastSync == null || record.endTime >= lastSync
-            }
-            .map { record ->
-                StepsData(
-                    count = record.count,
-                    startTime = record.startTime,
-                    endTime = record.endTime
+            try {
+                val request = AggregateRequest(
+                    metrics = setOf(StepsRecord.COUNT_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd)
                 )
+                val response = healthConnectClient.aggregate(request)
+                val totalSteps = response[StepsRecord.COUNT_TOTAL]
+
+                if (totalSteps != null && totalSteps > 0) {
+                    if (lastSync == null || effectiveEnd >= lastSync) {
+                        results.add(StepsData(
+                            count = totalSteps,
+                            startTime = dayStart,
+                            endTime = effectiveEnd
+                        ))
+                    }
+                }
+            } catch (e: Exception) {
+                // Skip this day on error
             }
+
+            dayStart = dayEnd
+        }
+
+        return results
     }
 
     private suspend fun readSleepData(
@@ -368,24 +391,129 @@ class HealthConnectManager(private val context: Context) {
     }
 
     private suspend fun readDistanceData(startTime: Instant, endTime: Instant, lastSync: Instant?): List<DistanceData> {
-        val request = ReadRecordsRequest(recordType = DistanceRecord::class, timeRangeFilter = TimeRangeFilter.between(startTime, endTime))
-        val response = healthConnectClient.readRecords(request)
-        return response.records.filter { lastSync == null || it.endTime >= lastSync }
-            .map { DistanceData(it.distance.inMeters, it.startTime, it.endTime) }
+        val results = mutableListOf<DistanceData>()
+        val sydneyZone = ZoneId.of("Australia/Sydney")
+        var dayStart = LocalDate.ofInstant(startTime, sydneyZone)
+            .atStartOfDay(sydneyZone)
+            .toInstant()
+        val rangeEnd = endTime
+
+        while (dayStart.isBefore(rangeEnd)) {
+            val dayEnd = LocalDate.ofInstant(dayStart, sydneyZone)
+                .plusDays(1)
+                .atStartOfDay(sydneyZone)
+                .toInstant()
+            val effectiveEnd = if (dayEnd.isAfter(rangeEnd)) rangeEnd else dayEnd
+
+            try {
+                val request = AggregateRequest(
+                    metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd)
+                )
+                val response = healthConnectClient.aggregate(request)
+                val totalDistance = response[DistanceRecord.DISTANCE_TOTAL]
+
+                if (totalDistance != null && totalDistance.inMeters > 0) {
+                    if (lastSync == null || effectiveEnd >= lastSync) {
+                        results.add(DistanceData(
+                            meters = totalDistance.inMeters,
+                            startTime = dayStart,
+                            endTime = effectiveEnd
+                        ))
+                    }
+                }
+            } catch (e: Exception) {
+                // Skip this day on error
+            }
+
+            dayStart = dayEnd
+        }
+
+        return results
     }
 
     private suspend fun readActiveCaloriesData(startTime: Instant, endTime: Instant, lastSync: Instant?): List<ActiveCaloriesData> {
-        val request = ReadRecordsRequest(recordType = ActiveCaloriesBurnedRecord::class, timeRangeFilter = TimeRangeFilter.between(startTime, endTime))
-        val response = healthConnectClient.readRecords(request)
-        return response.records.filter { lastSync == null || it.endTime >= lastSync }
-            .map { ActiveCaloriesData(it.energy.inKilocalories, it.startTime, it.endTime) }
+        val results = mutableListOf<ActiveCaloriesData>()
+        val sydneyZone = ZoneId.of("Australia/Sydney")
+        var dayStart = LocalDate.ofInstant(startTime, sydneyZone)
+            .atStartOfDay(sydneyZone)
+            .toInstant()
+        val rangeEnd = endTime
+
+        while (dayStart.isBefore(rangeEnd)) {
+            val dayEnd = LocalDate.ofInstant(dayStart, sydneyZone)
+                .plusDays(1)
+                .atStartOfDay(sydneyZone)
+                .toInstant()
+            val effectiveEnd = if (dayEnd.isAfter(rangeEnd)) rangeEnd else dayEnd
+
+            try {
+                val request = AggregateRequest(
+                    metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd)
+                )
+                val response = healthConnectClient.aggregate(request)
+                val totalCals = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
+
+                if (totalCals != null && totalCals.inKilocalories > 0) {
+                    if (lastSync == null || effectiveEnd >= lastSync) {
+                        results.add(ActiveCaloriesData(
+                            calories = totalCals.inKilocalories,
+                            startTime = dayStart,
+                            endTime = effectiveEnd
+                        ))
+                    }
+                }
+            } catch (e: Exception) {
+                // Skip this day on error
+            }
+
+            dayStart = dayEnd
+        }
+
+        return results
     }
 
     private suspend fun readTotalCaloriesData(startTime: Instant, endTime: Instant, lastSync: Instant?): List<TotalCaloriesData> {
-        val request = ReadRecordsRequest(recordType = TotalCaloriesBurnedRecord::class, timeRangeFilter = TimeRangeFilter.between(startTime, endTime))
-        val response = healthConnectClient.readRecords(request)
-        return response.records.filter { lastSync == null || it.endTime >= lastSync }
-            .map { TotalCaloriesData(it.energy.inKilocalories, it.startTime, it.endTime) }
+        val results = mutableListOf<TotalCaloriesData>()
+        val sydneyZone = ZoneId.of("Australia/Sydney")
+        var dayStart = LocalDate.ofInstant(startTime, sydneyZone)
+            .atStartOfDay(sydneyZone)
+            .toInstant()
+        val rangeEnd = endTime
+
+        while (dayStart.isBefore(rangeEnd)) {
+            val dayEnd = LocalDate.ofInstant(dayStart, sydneyZone)
+                .plusDays(1)
+                .atStartOfDay(sydneyZone)
+                .toInstant()
+            val effectiveEnd = if (dayEnd.isAfter(rangeEnd)) rangeEnd else dayEnd
+
+            try {
+                val request = AggregateRequest(
+                    metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd)
+                )
+                val response = healthConnectClient.aggregate(request)
+                val totalCals = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
+
+                if (totalCals != null && totalCals.inKilocalories > 0) {
+                    if (lastSync == null || effectiveEnd >= lastSync) {
+                        results.add(TotalCaloriesData(
+                            calories = totalCals.inKilocalories,
+                            startTime = dayStart,
+                            endTime = effectiveEnd
+                        ))
+                    }
+                }
+            } catch (e: Exception) {
+                // Skip this day on error
+            }
+
+            dayStart = dayEnd
+        }
+
+        return results
     }
 
     private suspend fun readWeightData(startTime: Instant, endTime: Instant, lastSync: Instant?): List<WeightData> {
