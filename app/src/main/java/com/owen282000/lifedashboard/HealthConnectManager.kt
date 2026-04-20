@@ -5,6 +5,7 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.*
+import androidx.health.connect.client.records.metadata.DataOrigin
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -321,7 +322,8 @@ class HealthConnectManager(private val context: Context) {
             try {
                 val request = AggregateRequest(
                     metrics = setOf(StepsRecord.COUNT_TOTAL),
-                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd)
+                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd),
+                    dataOriginFilter = GARMIN_ONLY
                 )
                 val response = healthConnectClient.aggregate(request)
                 val totalSteps = response[StepsRecord.COUNT_TOTAL]
@@ -408,7 +410,8 @@ class HealthConnectManager(private val context: Context) {
             try {
                 val request = AggregateRequest(
                     metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
-                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd)
+                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd),
+                    dataOriginFilter = GARMIN_ONLY
                 )
                 val response = healthConnectClient.aggregate(request)
                 val totalDistance = response[DistanceRecord.DISTANCE_TOTAL]
@@ -450,7 +453,8 @@ class HealthConnectManager(private val context: Context) {
             try {
                 val request = AggregateRequest(
                     metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
-                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd)
+                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd),
+                    dataOriginFilter = GARMIN_ONLY
                 )
                 val response = healthConnectClient.aggregate(request)
                 val totalCals = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
@@ -492,7 +496,8 @@ class HealthConnectManager(private val context: Context) {
             try {
                 val request = AggregateRequest(
                     metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL),
-                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd)
+                    timeRangeFilter = TimeRangeFilter.between(dayStart, effectiveEnd),
+                    dataOriginFilter = GARMIN_ONLY
                 )
                 val response = healthConnectClient.aggregate(request)
                 val totalCals = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
@@ -691,6 +696,15 @@ class HealthConnectManager(private val context: Context) {
 
     companion object {
         private const val LOOKBACK_HOURS = 168L  // 7 days
+
+        // Garmin Connect's Health Connect data source. Hard-coded because the four
+        // daily-aggregate queries below (steps, distance, active cals, total cals)
+        // MUST restrict to one source — otherwise any other app writing the same
+        // record type (Google Fit via Pixel motion sensors, Samsung Health, etc.)
+        // gets summed on top of Garmin's numbers. Observed 2026-04-20: Google Fit
+        // contributed ~1100 extra steps/day even after being "disconnected" from
+        // Health Connect, because disconnecting doesn't purge historical writes.
+        private val GARMIN_ONLY = setOf(DataOrigin("com.garmin.android.apps.connectmobile"))
 
         fun getPermissionsForTypes(types: Set<HealthDataType>): Set<String> {
             val permissions = types.map { HealthPermission.getReadPermission(it.recordClass) }.toMutableSet()
