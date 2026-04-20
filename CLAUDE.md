@@ -4,20 +4,24 @@ Android app that reads health data from **Health Connect**, packages it as JSON,
 
 - **Package:** `com.owen282000.lifedashboard`
 - **Current version:** 1.2.1 (`versionCode = 4`)
-- **Upstream:** https://github.com/owen282000/life-dashboard-companion-app (forked; this worktree is Ben's fork)
+- **Upstream:** https://github.com/owen282000/life-dashboard-companion-app (forked; Ben's fork at https://github.com/bencass/life-dashboard-companion-app)
 - **Dashboard repo:** `../../life tracker/life_monitor` (Next.js + Supabase)
+- **Supabase project ref:** `fugmajnyemsszzqgjqem` (region: Sydney)
 
 ## Data pipeline
 
 ```
-Garmin watch
+Garmin watch (+ Strava for activities, separate pipeline)
   → Garmin Connect app
   → Android Health Connect (local store)
-  → this companion app (WorkManager periodic, 60 min default)
+  → this companion app (WorkManager PeriodicWorkRequest, 60 min default)
   → POST JSON to Supabase edge function `health-sync`
   → upsert into `daily_health` (+ `hr_samples`) via `upsert_daily_health` RPC
+     (which computes residual-active server-side)
   → Life Monitor dashboard reads `daily_health`
 ```
+
+Activities (runs, rides, gym) are a separate pipeline: Garmin → Strava → Strava webhook → `strava-webhook` edge function → `activities` table. Not this app's concern.
 
 Relevant source files:
 
@@ -30,13 +34,31 @@ Relevant source files:
 | `app/src/main/java/com/owen282000/lifedashboard/PreferencesManager.kt` | All persistent app state: webhook URLs/headers, enabled data types, per-type last-sync timestamps, sync interval. |
 | `app/src/main/java/com/owen282000/lifedashboard/WebhookManager.kt` | OkHttp POST with retries + logs each call to the Logs tab. |
 
+## Battery optimisation — MUST BE UNRESTRICTED
+
+**Settings → Apps → Life Dashboard → Battery → Unrestricted.**
+
+`PeriodicWorkRequestBuilder` is best-effort under Android Doze / App Standby. If the app is on the default "Optimised" bucket, Android can defer the 60 min sync indefinitely — observed **6+ hour gaps on 2026-04-20** (last sync 10:13 AEST, then nothing until manual intervention at 16:30 AEST), which looks identical to an overwriting-values bug on the dashboard but is really just the phone not talking.
+
+Changed to **Unrestricted on 2026-04-20**. If syncs start lagging again, re-check this setting first — it's the single most likely cause of stale data.
+
+Secondary mitigations (code-side, not yet implemented):
+- Request `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` during onboarding so the user doesn't have to dig into settings.
+- Consider a foreground service with a persistent notification for syncing.
+- Surface "Last sync: Nm ago" on the app's home screen so staleness is visible before opening the dashboard.
+
+## Known issues
+
+- **DNS resolution failure** — observed once on 2026-04-19 21:05 AEST. Transient network / Cloudflare. The retry logic in `WebhookManager` (3 attempts, exponential backoff) recovered on the next scheduled sync. If it recurs, check the phone's DNS settings / VPN.
+- **HTTP 500 on large payloads** — observed 2026-04-19 18:02 AEST with a 1041-record payload. The edge function likely timed out or hit a memory limit processing that many HR samples in one call. Mitigations: periodic syncs should keep record counts small, but a long offline period (no sync overnight + all day) could reload a big backlog. If this recurs, consider chunking `hr_samples` inserts on the edge function side (currently 500-row batches inside `processDate`, but the overall function still does one RPC per date).
+
 ## Calorie model — IMPORTANT
 
 **Do not trust `ActiveCaloriesBurnedRecord` from Garmin's Health Connect write.** Garmin only writes active-calorie records for explicitly recorded workouts, so the Health Connect aggregate for ACTIVE_CALORIES is usually a small fraction of Garmin Connect's own all-day figure (Apr 19 2026: Garmin UI said 550 kcal, Health Connect aggregate was 153 kcal).
 
 `TotalCaloriesBurnedRecord` (ENERGY_TOTAL) is reliable — it's Garmin's all-day total (BMR + active).
 
-So the edge function derives the active figure on the server:
+Residual-active is computed **in the Supabase `upsert_daily_health` RPC / trigger**:
 
 ```
 residual_active = max(0, total_calories − BMR × fractionOfAestDay)
@@ -47,9 +69,13 @@ residual_active = max(0, total_calories − BMR × fractionOfAestDay)
 - `BMR` is Mifflin–St Jeor over `user_profile.date_of_birth / height_cm / sex / weight_kg`
 - Clamp to `≥ 0` (Garmin under-reports early in the morning; a small negative is just math, not a deficit)
 
-Both values land in `daily_health`: raw `total_calories` + derived `active_calories`. Companion app's job is just to deliver both raw arrays; it does no BMR math.
+Both values land in `daily_health`: raw `total_calories` + derived `active_calories`.
 
-See: `../../life tracker/life_monitor/supabase/functions/health-sync/index.ts` (v9+).
+**Do not replicate this math in TS** (the edge function) — it already happens in the DB and a TS duplicate would double-count. The edge function just forwards raw Garmin totals to `p_total_calories` and the raw Garmin active value to `p_active_calories`; the DB decides what ends up in the column.
+
+Companion app's job is just to deliver both raw arrays; it does no BMR math.
+
+See: `../../life tracker/life_monitor/supabase/functions/health-sync/index.ts` (v9+) and the `upsert_daily_health` function definition on the Supabase project `fugmajnyemsszzqgjqem`.
 
 ## Timezone
 
