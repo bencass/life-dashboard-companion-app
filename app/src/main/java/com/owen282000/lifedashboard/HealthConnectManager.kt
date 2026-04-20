@@ -317,7 +317,11 @@ class HealthConnectManager(private val context: Context) {
                 .plusDays(1)
                 .atStartOfDay(sydneyZone)
                 .toInstant()
-            val effectiveEnd = if (dayEnd.isAfter(rangeEnd)) rangeEnd else dayEnd
+            // Query the FULL AEST day (not clamped to now). Garmin writes some
+            // records (notably TotalCaloriesBurnedRecord) with end_time = 23:59,
+            // and HC's AggregateRequest prorates partially-overlapping records by
+            // time. Clamping to now under-counted today's total by ~170 kcal.
+            val effectiveEnd = dayEnd
 
             try {
                 val request = AggregateRequest(
@@ -405,7 +409,7 @@ class HealthConnectManager(private val context: Context) {
                 .plusDays(1)
                 .atStartOfDay(sydneyZone)
                 .toInstant()
-            val effectiveEnd = if (dayEnd.isAfter(rangeEnd)) rangeEnd else dayEnd
+            val effectiveEnd = dayEnd
 
             try {
                 val request = AggregateRequest(
@@ -448,7 +452,7 @@ class HealthConnectManager(private val context: Context) {
                 .plusDays(1)
                 .atStartOfDay(sydneyZone)
                 .toInstant()
-            val effectiveEnd = if (dayEnd.isAfter(rangeEnd)) rangeEnd else dayEnd
+            val effectiveEnd = dayEnd
 
             try {
                 val request = AggregateRequest(
@@ -491,7 +495,7 @@ class HealthConnectManager(private val context: Context) {
                 .plusDays(1)
                 .atStartOfDay(sydneyZone)
                 .toInstant()
-            val effectiveEnd = if (dayEnd.isAfter(rangeEnd)) rangeEnd else dayEnd
+            val effectiveEnd = dayEnd
 
             try {
                 val request = AggregateRequest(
