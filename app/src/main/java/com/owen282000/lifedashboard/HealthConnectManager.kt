@@ -332,14 +332,19 @@ class HealthConnectManager(private val context: Context) {
                 val response = healthConnectClient.aggregate(request)
                 val totalSteps = response[StepsRecord.COUNT_TOTAL]
 
+                // Always add every day in the lookback window. Don't gate on
+                // lastSync — Garmin reconciles past-day totals after midnight
+                // (e.g. adding ~458 kcal to the prior day's total_calories a few
+                // hours into the next day). Filtering past days out here means
+                // those reconciliations never reach the DB. The server's upsert
+                // is idempotent (`GREATEST(existing, new)` on the cumulative
+                // columns), so re-sending every sync is safe and required.
                 if (totalSteps != null && totalSteps > 0) {
-                    if (lastSync == null || effectiveEnd >= lastSync) {
-                        results.add(StepsData(
-                            count = totalSteps,
-                            startTime = dayStart,
-                            endTime = effectiveEnd
-                        ))
-                    }
+                    results.add(StepsData(
+                        count = totalSteps,
+                        startTime = dayStart,
+                        endTime = effectiveEnd
+                    ))
                 }
             } catch (e: Exception) {
                 // Skip this day on error
@@ -421,13 +426,11 @@ class HealthConnectManager(private val context: Context) {
                 val totalDistance = response[DistanceRecord.DISTANCE_TOTAL]
 
                 if (totalDistance != null && totalDistance.inMeters > 0) {
-                    if (lastSync == null || effectiveEnd >= lastSync) {
-                        results.add(DistanceData(
-                            meters = totalDistance.inMeters,
-                            startTime = dayStart,
-                            endTime = effectiveEnd
-                        ))
-                    }
+                    results.add(DistanceData(
+                        meters = totalDistance.inMeters,
+                        startTime = dayStart,
+                        endTime = effectiveEnd
+                    ))
                 }
             } catch (e: Exception) {
                 // Skip this day on error
@@ -464,13 +467,11 @@ class HealthConnectManager(private val context: Context) {
                 val totalCals = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
 
                 if (totalCals != null && totalCals.inKilocalories > 0) {
-                    if (lastSync == null || effectiveEnd >= lastSync) {
-                        results.add(ActiveCaloriesData(
-                            calories = totalCals.inKilocalories,
-                            startTime = dayStart,
-                            endTime = effectiveEnd
-                        ))
-                    }
+                    results.add(ActiveCaloriesData(
+                        calories = totalCals.inKilocalories,
+                        startTime = dayStart,
+                        endTime = effectiveEnd
+                    ))
                 }
             } catch (e: Exception) {
                 // Skip this day on error
@@ -507,13 +508,11 @@ class HealthConnectManager(private val context: Context) {
                 val totalCals = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
 
                 if (totalCals != null && totalCals.inKilocalories > 0) {
-                    if (lastSync == null || effectiveEnd >= lastSync) {
-                        results.add(TotalCaloriesData(
-                            calories = totalCals.inKilocalories,
-                            startTime = dayStart,
-                            endTime = effectiveEnd
-                        ))
-                    }
+                    results.add(TotalCaloriesData(
+                        calories = totalCals.inKilocalories,
+                        startTime = dayStart,
+                        endTime = effectiveEnd
+                    ))
                 }
             } catch (e: Exception) {
                 // Skip this day on error
